@@ -6,7 +6,7 @@ from datetime import datetime, UTC
 
 from dotenv import load_dotenv
 from discord_webhook import AsyncDiscordWebhook, DiscordEmbed
-from typing import List, Union
+from typing import List, Union, TypedDict
 
 load_dotenv()
 
@@ -19,7 +19,9 @@ if not os.getenv("DISCORD_WEBHOOK_URL"):
     print("DISCORD_WEBHOOK_URL environment variable not set. Exiting...")
     exit(1)
 
-
+class VersionEntry(TypedDict):
+    version: str
+    fileSize: int
 
 class HumanBytes:
     METRIC_LABELS: List[str] = ["B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
@@ -88,7 +90,7 @@ async def send_discord_webhook(version: str, file_size: float, old_version: str,
     webhook.add_embed(embed)
     await webhook.execute()
 
-async def get_version_details():
+async def get_version_details() -> VersionEntry | None:
     headers = {'User-Agent': USER_AGENT}
     
     async with httpx.AsyncClient() as client:
@@ -107,11 +109,8 @@ async def get_version_details():
             return None
 
         latest_entry = versions_list[-1]
-        
-        return {
-            "version": latest_entry.get('version'),
-            "fileSize": int(latest_entry.get('fileSize'))
-        }
+        latest_entry["fileSize"] = int(latest_entry["fileSize"])
+        return latest_entry
 
 async def check_version(current_sdk_version: str, current_sdk_size: float):
     try:
@@ -175,12 +174,12 @@ async def main():
         return
     while True:
         try:
-            current_sdk_version, current_sdk_size = await check_version(current_sdk_version, current_sdk_size)
+            if current_sdk_version and current_sdk_size:
+                current_sdk_version, current_sdk_size = await check_version(current_sdk_version, current_sdk_size)
             await asyncio.sleep(10)
         except KeyboardInterrupt:
             print("Exiting...")
             return
 
 if __name__ == "__main__":
-    # asyncio.run(send_discord_webhook("1.0.0", 6528632708, "0.0.9", 5528637863))
     asyncio.run(main())
