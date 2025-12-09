@@ -73,11 +73,12 @@ async def send_discord_webhook(version: str, file_size: float, old_version: str,
     if old_size < file_size:
         size_change = f"+{size_change}"
 
-    webhook = AsyncDiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"))
+    allowed_mentions = {
+        "roles": ["916729041002852363", "916779659239239691"]
+    }
+    content = "New Portal SDK Version Available! <@&916729041002852363>"
+    webhook = AsyncDiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), allowed_mentions=allowed_mentions, content=content )
     embed = DiscordEmbed(username="Portal SDK Watchtower", color=0x00ff00)
-
-    embed.title = f"New Portal SDK Version Available!"
-    embed.description = "<@&916729041002852363>"
     embed.set_thumbnail(url="https://lis.bfportal.gg/portal-animation-logo.gif")
     embed.add_embed_field(name="New Version", value=f"`{old_version} -> {version}`")
     embed.add_embed_field(name="File Size", value=f"{file_size_readable}")
