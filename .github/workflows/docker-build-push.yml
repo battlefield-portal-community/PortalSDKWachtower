@@ -58,6 +58,6 @@ jobs:
           cache-to: type=gha,mode=max
           file: './Dockerfile'
 
-#      - name: Trigger new deployment
-#        run: |
-#          curl -X POST ${{ secrets.DEPLOYMENT_WEBHOOK }}
+      - name: Trigger new deployment
+        run: |
+          curl -X POST ${{ secrets.DEPLOYMENT_WEBHOOK }}
