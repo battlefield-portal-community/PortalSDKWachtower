@@ -77,8 +77,8 @@ async def send_discord_webhook(version: str, file_size: float, old_version: str,
     embed = DiscordEmbed(username="Portal SDK Watchtower", color=0x00ff00)
 
     embed.title = f"New Portal SDK Version Available!"
+    embed.description = "<@916729041002852363>"
     embed.set_thumbnail(url="https://lis.bfportal.gg/portal-animation-logo.gif")
-
     embed.add_embed_field(name="New Version", value=f"`{old_version} -> {version}`")
     embed.add_embed_field(name="File Size", value=f"{file_size_readable}")
     embed.add_embed_field(name="", value="[Download](https://download.portal.battlefield.com/PortalSDK.zip)", inline=False)
