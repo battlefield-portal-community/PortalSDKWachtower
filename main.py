@@ -11,7 +11,7 @@ from typing import List, Union, TypedDict
 load_dotenv()
 
 # Configuration from the YAML env
-LOCK_FILE = "version.lock"
+LOCK_FILE = os.getenv("LOCK_FILE_PATH", "version.lock")
 URL = "https://download.portal.battlefield.com/versions.json"
 # Using the specific User-Agent from the curl command to ensure consistent behavior
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:143.0) Gecko/20100101 Firefox/143.0 PortalSDKWachtower/https://github.com/battlefield-portal-community/PortalSDKWachtower"
