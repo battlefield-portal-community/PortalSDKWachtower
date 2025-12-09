@@ -1,0 +1,8 @@
+services:
+  watchtower:
+    build: .
+    volumes:
+      - ./version.lock:/app/version.lock
+    command: bash -c "python3 /app/main.py"
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
