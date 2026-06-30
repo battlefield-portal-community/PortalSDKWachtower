@@ -1,0 +1,16 @@
+name = "hoard-bfportal"
+main = "src/index.ts"
+compatibility_date = "2025-07-01"
+
+# R2 bucket that holds the SDK zips and versions.json.
+# Replace bucket_name with the actual bucket bound to hoard.bfportal.gg.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "REPLACE_WITH_R2_BUCKET_NAME"
+
+# Serve the Worker on the custom domain. This REPLACES the R2 custom domain
+# on this hostname (a Worker route and an R2 custom domain cannot coexist on
+# the same hostname) — see Part 4 (cutover) in the plan.
+[[routes]]
+pattern = "hoard.bfportal.gg"
+custom_domain = true
