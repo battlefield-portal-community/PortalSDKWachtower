@@ -1,4 +1,4 @@
-name = "hoard-bfportal"
+name = "portal-sdk-watch-tower"
 main = "src/index.ts"
 compatibility_date = "2025-07-01"
 
@@ -6,7 +6,7 @@ compatibility_date = "2025-07-01"
 # Replace bucket_name with the actual bucket bound to hoard.bfportal.gg.
 [[r2_buckets]]
 binding = "BUCKET"
-bucket_name = "REPLACE_WITH_R2_BUCKET_NAME"
+bucket_name = "horde"
 
 # Serve the Worker on the custom domain. This REPLACES the R2 custom domain
 # on this hostname (a Worker route and an R2 custom domain cannot coexist on
