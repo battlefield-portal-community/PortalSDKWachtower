@@ -60,4 +60,4 @@ jobs:
 
       - name: Trigger new deployment
         run: |
-          curl -X POST ${{ secrets.DEPLOYMENT_WEBHOOK }}
+          curl -sS -X POST --max-time 30 "${{ secrets.DEPLOYMENT_WEBHOOK }}?COMMIT_ID=${{ github.sha }}" || true
