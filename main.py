@@ -4,6 +4,8 @@ import os
 import json
 from datetime import datetime, UTC
 
+import boto3
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 from discord_webhook import AsyncDiscordWebhook, DiscordEmbed
@@ -15,6 +17,12 @@ load_dotenv()
 class Settings(BaseSettings):
     discord_webhook_url: str
     lock_file_path: str = "version.lock"
+    # Cloudflare R2 (S3-compatible) credentials for uploading SDKs.
+    r2_account_id: str
+    r2_access_key_id: str
+    r2_secret_access_key: str
+    r2_bucket: str
+    r2_endpoint: str
 
 
 # Module-level settings instance. Constructing this raises if a required
@@ -23,8 +31,128 @@ env = Settings()
 
 LOCK_FILE = env.lock_file_path
 URL = "https://download.portal.battlefield.com/versions.json"
+SDK_DOWNLOAD_URL = "https://download.portal.battlefield.com/PortalSDK.zip"
+# Object key (in the R2 bucket) holding the version -> file mapping the Worker reads.
+MAPPING_KEY = "versions.json"
+# Multipart part size. Must be >= 5 MiB (S3 minimum for non-final parts).
+MULTIPART_PART_SIZE = 100 * 1024 * 1024  # 100 MiB
 # Using the specific User-Agent from the curl command to ensure consistent behavior
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:143.0) Gecko/20100101 Firefox/143.0 PortalSDKWachtower/https://github.com/battlefield-portal-community/PortalSDKWachtower"
+
+
+def _r2_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=env.r2_endpoint,
+        aws_access_key_id=env.r2_access_key_id,
+        aws_secret_access_key=env.r2_secret_access_key,
+        region_name="auto",
+    )
+
+
+def _object_exists(client, key: str) -> bool:
+    try:
+        client.head_object(Bucket=env.r2_bucket, Key=key)
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
+def _stream_download_to_r2(client, key: str) -> int:
+    """Stream the SDK zip straight into an R2 multipart upload.
+
+    The full (~6.5 GB) file is never buffered to disk: chunks are read from the
+    HTTP stream into an in-memory buffer and flushed as ~100 MiB parts.
+    """
+    mpu = client.create_multipart_upload(
+        Bucket=env.r2_bucket, Key=key, ContentType="application/zip"
+    )
+    upload_id = mpu["UploadId"]
+    parts: list[dict] = []
+    total = 0
+    try:
+        with httpx.Client(timeout=None) as hx:
+            with hx.stream("GET", SDK_DOWNLOAD_URL, headers={"User-Agent": USER_AGENT}) as resp:
+                resp.raise_for_status()
+                buffer = bytearray()
+                part_number = 1
+                for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    buffer.extend(chunk)
+                    total += len(chunk)
+                    while len(buffer) >= MULTIPART_PART_SIZE:
+                        body = bytes(buffer[:MULTIPART_PART_SIZE])
+                        del buffer[:MULTIPART_PART_SIZE]
+                        result = client.upload_part(
+                            Bucket=env.r2_bucket, Key=key, PartNumber=part_number,
+                            UploadId=upload_id, Body=body,
+                        )
+                        parts.append({"ETag": result["ETag"], "PartNumber": part_number})
+                        part_number += 1
+                # Final part: whatever remains (any size is allowed for the last part).
+                # Also covers the small-file case where no full part was flushed.
+                if buffer or not parts:
+                    result = client.upload_part(
+                        Bucket=env.r2_bucket, Key=key, PartNumber=part_number,
+                        UploadId=upload_id, Body=bytes(buffer),
+                    )
+                    parts.append({"ETag": result["ETag"], "PartNumber": part_number})
+        client.complete_multipart_upload(
+            Bucket=env.r2_bucket, Key=key, UploadId=upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+        return total
+    except Exception:
+        client.abort_multipart_upload(Bucket=env.r2_bucket, Key=key, UploadId=upload_id)
+        raise
+
+
+def _update_mapping(client, entry: dict) -> None:
+    try:
+        obj = client.get_object(Bucket=env.r2_bucket, Key=MAPPING_KEY)
+        mapping = json.loads(obj["Body"].read())
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            mapping = {"versions": []}
+        else:
+            raise
+
+    versions = mapping.setdefault("versions", [])
+    if not any(v.get("key") == entry["key"] for v in versions):
+        versions.append(entry)
+    client.put_object(
+        Bucket=env.r2_bucket, Key=MAPPING_KEY,
+        Body=json.dumps(mapping, indent=2).encode(),
+        ContentType="application/json",
+    )
+
+
+def _upload_and_register(version: str, file_size: int) -> None:
+    """Blocking R2 work: upload the SDK (if needed) and update versions.json."""
+    client = _r2_client()
+    key = f"SDKs/PortalSDK-v{version}.zip"
+
+    if _object_exists(client, key):
+        print(f"R2 object {key} already exists; skipping upload.")
+    else:
+        print(f"Uploading SDK to R2 as {key}...")
+        uploaded = _stream_download_to_r2(client, key)
+        print(f"Uploaded {key} ({uploaded} bytes) to R2.")
+
+    entry = {
+        "version": version,
+        "key": key,
+        "fileSize": file_size,
+        "lastModified": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _update_mapping(client, entry)
+    print(f"Updated {MAPPING_KEY} with {key}.")
+
+
+async def upload_sdk_to_r2(version: str, file_size: int) -> None:
+    """Run the blocking R2 upload + mapping update off the event loop."""
+    await asyncio.to_thread(_upload_and_register, version, file_size)
 
 class VersionEntry(TypedDict):
     version: str
@@ -143,9 +271,22 @@ async def check_version(current_sdk_version: str, current_sdk_size: float):
                 with open(LOCK_FILE, 'w') as f:
                     json.dump(details, f, indent=4)
                 print(f"Updated {LOCK_FILE} with new version info.")
-                await send_discord_webhook(new_version, new_size, current_sdk_version, current_sdk_size)
             except Exception as e:
                 print(f"Failed to update {LOCK_FILE}: {e}")
+
+            # Notify first so the ping goes out ASAP. A failure here must NOT
+            # block the R2 upload below — the two are independent.
+            try:
+                await send_discord_webhook(new_version, new_size, current_sdk_version, current_sdk_size)
+            except Exception as e:
+                print(f"Failed to send Discord notification: {e}")
+
+            # Download the new SDK, upload it to R2, and update the mapping.
+            try:
+                await upload_sdk_to_r2(new_version, new_size)
+            except Exception as e:
+                print(f"Failed to upload SDK to R2 / update mapping: {e}")
+
             return new_version, new_size
 
         return current_sdk_version, current_sdk_size
