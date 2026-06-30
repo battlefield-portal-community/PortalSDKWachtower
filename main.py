@@ -5,19 +5,26 @@ import json
 from datetime import datetime, UTC
 
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 from discord_webhook import AsyncDiscordWebhook, DiscordEmbed
 from typing import List, Union, TypedDict
 
 load_dotenv()
 
-# Configuration from the YAML env
-LOCK_FILE = os.getenv("LOCK_FILE_PATH", "version.lock")
+
+class Settings(BaseSettings):
+    discord_webhook_url: str
+    lock_file_path: str = "version.lock"
+
+
+# Module-level settings instance. Constructing this raises if a required
+# field (e.g. DISCORD_WEBHOOK_URL) is missing, so startup fails fast.
+env = Settings()
+
+LOCK_FILE = env.lock_file_path
 URL = "https://download.portal.battlefield.com/versions.json"
 # Using the specific User-Agent from the curl command to ensure consistent behavior
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:143.0) Gecko/20100101 Firefox/143.0 PortalSDKWachtower/https://github.com/battlefield-portal-community/PortalSDKWachtower"
-if not os.getenv("DISCORD_WEBHOOK_URL"):
-    print("DISCORD_WEBHOOK_URL environment variable not set. Exiting...")
-    exit(1)
 
 class VersionEntry(TypedDict):
     version: str
@@ -77,7 +84,7 @@ async def send_discord_webhook(version: str, file_size: float, old_version: str,
         "roles": ["916729041002852363", "916779659239239691"]
     }
     content = "New Portal SDK Version Available! <@&916729041002852363>"
-    webhook = AsyncDiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), allowed_mentions=allowed_mentions, content=content )
+    webhook = AsyncDiscordWebhook(url=env.discord_webhook_url, allowed_mentions=allowed_mentions, content=content )
     embed = DiscordEmbed(username="Portal SDK Watchtower", color=0x00ff00)
     embed.set_thumbnail(url="https://lis.bfportal.gg/portal-animation-logo.gif")
     embed.add_embed_field(name="New Version", value=f"`{old_version} -> {version}`")
