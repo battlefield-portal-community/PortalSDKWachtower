@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     r2_secret_access_key: str
     r2_bucket: str
     r2_endpoint: str
+    skip_r2_upload: bool = False
+    skip_r2_mapping_update: bool = False
 
 
 # Module-level settings instance. Constructing this raises if a required
@@ -66,6 +68,8 @@ def _stream_download_to_r2(client, key: str) -> int:
     The full (~6.5 GB) file is never buffered to disk: chunks are read from the
     HTTP stream into an in-memory buffer and flushed as ~100 MiB parts.
     """
+    if env.skip_r2_upload:
+        return 0
     mpu = client.create_multipart_upload(
         Bucket=env.r2_bucket, Key=key, ContentType="application/zip"
     )
@@ -109,6 +113,8 @@ def _stream_download_to_r2(client, key: str) -> int:
 
 
 def _update_mapping(client, entry: dict) -> None:
+    if env.skip_r2_mapping_update:
+        return
     try:
         obj = client.get_object(Bucket=env.r2_bucket, Key=MAPPING_KEY)
         mapping = json.loads(obj["Body"].read())
