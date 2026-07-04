@@ -139,17 +139,25 @@ def _upload_and_register(version: str, file_size: int, last_modified: str) -> No
     client = _r2_client()
     key = f"SDKs/PortalSDK-v{version}.zip"
 
-    if _object_exists(client, key):
+    # Size that describes the object actually stored in R2. The API-advertised
+    # file_size can be stale (observed 58 bytes larger than the real zip), so we
+    # prefer the true stored-object size. Falls back to file_size when the upload
+    # is skipped locally (env.skip_r2_upload) and there's no object to measure.
+    actual_size = file_size
+    if env.skip_r2_upload:
+        print("R2 upload skipped (skip_r2_upload); using API-advertised size.")
+    elif _object_exists(client, key):
         print(f"R2 object {key} already exists; skipping upload.")
+        actual_size = client.head_object(Bucket=env.r2_bucket, Key=key)["ContentLength"]
     else:
         print(f"Uploading SDK to R2 as {key}...")
-        uploaded = _stream_download_to_r2(client, key)
-        print(f"Uploaded {key} ({uploaded} bytes) to R2.")
+        actual_size = _stream_download_to_r2(client, key)
+        print(f"Uploaded {key} ({actual_size} bytes) to R2.")
 
     entry = {
         "version": version,
         "key": key,
-        "fileSize": file_size,
+        "fileSize": actual_size,
         "lastModified": last_modified,
     }
     _update_mapping(client, entry)
