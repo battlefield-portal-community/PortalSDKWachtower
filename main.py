@@ -128,7 +128,7 @@ def _update_mapping(client, entry: dict) -> None:
     )
 
 
-def _upload_and_register(version: str, file_size: int) -> None:
+def _upload_and_register(version: str, file_size: int, last_modified: str) -> None:
     """Blocking R2 work: upload the SDK (if needed) and update versions.json."""
     client = _r2_client()
     key = f"SDKs/PortalSDK-v{version}.zip"
@@ -144,19 +144,20 @@ def _upload_and_register(version: str, file_size: int) -> None:
         "version": version,
         "key": key,
         "fileSize": file_size,
-        "lastModified": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        "lastModified": last_modified,
     }
     _update_mapping(client, entry)
     print(f"Updated {MAPPING_KEY} with {key}.")
 
 
-async def upload_sdk_to_r2(version: str, file_size: int) -> None:
+async def upload_sdk_to_r2(version: str, file_size: int, last_modified: str) -> None:
     """Run the blocking R2 upload + mapping update off the event loop."""
-    await asyncio.to_thread(_upload_and_register, version, file_size)
+    await asyncio.to_thread(_upload_and_register, version, file_size, last_modified)
 
 class VersionEntry(TypedDict):
     version: str
     fileSize: int
+    lastModified: str
 
 class HumanBytes:
     METRIC_LABELS: List[str] = ["B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
@@ -267,6 +268,12 @@ async def check_version(current_sdk_version: str, current_sdk_size: float):
         if size_mismatch:
                 print(f"Portal SDK size has changed. Old: {current_sdk_size}, New: {new_size}")
         if version_mismatch or size_mismatch:
+            # Stamp the moment we detected this release, in UTC. Reused for both
+            # the lock file and the R2 entry so they agree (and so the R2 time
+            # reflects detection, not upload-completion which can lag by hours).
+            detected_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            details["lastModified"] = detected_at
+
             try:
                 with open(LOCK_FILE, 'w') as f:
                     json.dump(details, f, indent=4)
@@ -283,7 +290,7 @@ async def check_version(current_sdk_version: str, current_sdk_size: float):
 
             # Download the new SDK, upload it to R2, and update the mapping.
             try:
-                await upload_sdk_to_r2(new_version, new_size)
+                await upload_sdk_to_r2(new_version, new_size, detected_at)
             except Exception as e:
                 print(f"Failed to upload SDK to R2 / update mapping: {e}")
 
