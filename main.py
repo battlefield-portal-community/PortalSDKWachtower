@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     r2_endpoint: str
     skip_r2_upload: bool = False
     skip_r2_mapping_update: bool = False
+    skip_local_mapping_update: bool = False
 
 
 # Module-level settings instance. Constructing this raises if a required
@@ -240,6 +241,7 @@ async def send_discord_webhook(version: str, file_size: float, old_version: str,
 
     webhook.add_embed(embed)
     await webhook.execute()
+    print("Notification send to discord....")
 
 async def get_version_details() -> VersionEntry | None:
     headers = {'User-Agent': USER_AGENT}
@@ -289,9 +291,10 @@ async def check_version(current_sdk_version: str, current_sdk_size: float):
             details["lastModified"] = detected_at
 
             try:
-                with open(LOCK_FILE, 'w') as f:
-                    json.dump(details, f, indent=4)
-                print(f"Updated {LOCK_FILE} with new version info.")
+                if not env.skip_local_mapping_update:
+                    with open(LOCK_FILE, 'w') as f:
+                        json.dump(details, f, indent=4)
+                    print(f"Updated {LOCK_FILE} with new version info.")
             except Exception as e:
                 print(f"Failed to update {LOCK_FILE}: {e}")
 
