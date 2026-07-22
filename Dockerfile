@@ -22,6 +22,10 @@ RUN uv sync --frozen --no-install-project --no-dev
 # Stage 2: Runtime stage
 FROM python:3.13-slim-bookworm
 
+RUN apt-get update && apt-get install -y \
+    vim \
+    && rm -rf /var/lib/apt/lists/* \
+
 WORKDIR /app
 
 # Copy the virtual environment from the builder stage
