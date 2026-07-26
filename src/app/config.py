@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     skip_r2_upload: bool = False
     skip_r2_mapping_update: bool = False
     skip_local_mapping_update: bool = False
+    # How often (seconds) to poll versions.json when healthy. Kept short so a
+    # new release is detected (and notified) fast; a healthy poll is a cheap
+    # zero-byte 304 thanks to the conditional (If-None-Match) request, so
+    # polling often costs almost nothing. Only failures trigger backoff.
+    poll_interval_seconds: float = 10.0
+    # Per-request timeout (seconds) so a stalled connection fails fast.
+    request_timeout_seconds: float = 15.0
+    # Upper bound (seconds) on the exponential backoff applied after failures.
+    max_backoff_seconds: float = 300.0
 
 
 # Module-level settings instance. Constructing this raises if a required
