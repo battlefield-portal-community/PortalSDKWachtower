@@ -1,10 +1,4 @@
-from typing import List, Union, TypedDict
-
-
-class VersionEntry(TypedDict):
-    version: str
-    fileSize: int
-    lastModified: str
+from typing import List, Union
 
 
 class HumanBytes:
