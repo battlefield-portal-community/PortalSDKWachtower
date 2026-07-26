@@ -116,10 +116,6 @@ async def main():
         print("Failed to fetch latest version to create baseline. Exiting...")
         return
     while True:
-        try:
-            if current_sdk_version and current_sdk_size:
-                current_sdk_version, current_sdk_size = await check_version(current_sdk_version, current_sdk_size)
-            await asyncio.sleep(10)
-        except KeyboardInterrupt:
-            print("Exiting...")
-            return
+        if current_sdk_version and current_sdk_size:
+            current_sdk_version, current_sdk_size = await check_version(current_sdk_version, current_sdk_size)
+        await asyncio.sleep(10)
