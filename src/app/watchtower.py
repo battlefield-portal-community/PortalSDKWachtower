@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, UTC
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -12,6 +13,24 @@ from app.r2 import upload_sdk_to_r2
 
 # Sentinel returned when the CDN reports the manifest is unchanged (HTTP 304).
 NOT_MODIFIED = object()
+
+
+def _parse_http_date(value: str | None) -> str | None:
+    """Convert an HTTP-date header (e.g. 'Tue, 21 Jul 2026 14:50:00 GMT') to our
+    stored 'YYYY-MM-DD HH:MM:SS' UTC format. Returns None if the header is
+    absent or unparseable, so callers can fall back to a local timestamp."""
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    # HTTP-dates are GMT; guard against a naive datetime just in case.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 async def get_version_details(
@@ -48,6 +67,11 @@ async def get_version_details(
 
     latest_entry = versions_list[-1]
     latest_entry["fileSize"] = int(latest_entry["fileSize"])
+    # Prefer the CDN's Last-Modified (when the manifest was published) over our
+    # local detection time. check_version falls back if this is absent.
+    published_at = _parse_http_date(response.headers.get("Last-Modified"))
+    if published_at:
+        latest_entry["lastModified"] = published_at
     # Keep the CDN's ETag if it sent one; otherwise reuse the previous value.
     return latest_entry, response.headers.get("ETag", etag)
 
@@ -77,11 +101,12 @@ async def check_version(
         print(f"Portal SDK size has changed. Old: {current_sdk_size}, New: {new_size}")
 
     if version_mismatch or size_mismatch:
-        # Stamp the moment we detected this release, in UTC. Reused for both
-        # the lock file and the R2 entry so they agree (and so the R2 time
-        # reflects detection, not upload-completion which can lag by hours).
-        detected_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-        details["lastModified"] = detected_at
+        # Timestamp of the release, in UTC. Prefer the manifest's Last-Modified
+        # (set from the CDN header in get_version_details); fall back to the
+        # moment we detected it if the CDN didn't send a usable header. Reused
+        # for both the lock file and the R2 entry so they agree.
+        published_at = details.get("lastModified") or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        details["lastModified"] = published_at
 
         try:
             if not env.skip_local_mapping_update:
@@ -100,7 +125,7 @@ async def check_version(
 
         # Download the new SDK, upload it to R2, and update the mapping.
         try:
-            await upload_sdk_to_r2(new_version, new_size, detected_at)
+            await upload_sdk_to_r2(new_version, new_size, published_at)
         except Exception as e:
             print(f"Failed to upload SDK to R2 / update mapping: {e}")
 
