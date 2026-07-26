@@ -78,8 +78,325 @@ function formatDelta(bytes: number): string {
   return `${sign}${formatSize(Math.abs(bytes))}`;
 }
 
+const THEME_CSS = `
+    :root {
+        color-scheme: dark;
+        --bg: #05070a;
+        --bg-glow-a: #0b2417;
+        --bg-glow-b: #0a1622;
+        --panel: rgba(12, 18, 22, 0.72);
+        --line: rgba(184, 255, 47, 0.14);
+        --line-soft: rgba(184, 255, 47, 0.06);
+        --text: #cfe3d4;
+        --text-dim: #6f8479;
+        --accent: #b8ff2f;
+        --accent-2: #4ad9ff;
+        --up: #6ee787;
+        --down: #ff6b5e;
+        --row-hover: rgba(184, 255, 47, 0.05);
+        --scan: rgba(190, 255, 160, 0.028);
+        --glow: 0 0 12px rgba(184, 255, 47, 0.45);
+    }
+
+    :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #eef1e9;
+        --bg-glow-a: #dbe6cf;
+        --bg-glow-b: #d7e3e8;
+        --panel: rgba(255, 255, 255, 0.7);
+        --line: rgba(24, 46, 20, 0.16);
+        --line-soft: rgba(24, 46, 20, 0.07);
+        --text: #1d2a1e;
+        --text-dim: #5d6c5c;
+        --accent: #3d7a00;
+        --accent-2: #00688c;
+        --up: #1f7a33;
+        --down: #b3261e;
+        --row-hover: rgba(61, 122, 0, 0.07);
+        --scan: rgba(24, 46, 20, 0.022);
+        --glow: 0 0 10px rgba(61, 122, 0, 0.25);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        padding: clamp(1.25rem, 4vw, 3.5rem) clamp(0.75rem, 4vw, 3rem);
+        background:
+            radial-gradient(1200px 600px at 12% -10%, var(--bg-glow-a), transparent 65%),
+            radial-gradient(900px 500px at 92% 8%, var(--bg-glow-b), transparent 60%),
+            var(--bg);
+        color: var(--text);
+        font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+        font-size: 14px;
+        line-height: 1.55;
+        letter-spacing: 0.01em;
+    }
+
+    /* CRT scanlines + a slow sweep, both purely decorative. */
+    body::before, body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9;
+    }
+    body::before {
+        background: repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 3px);
+        mix-blend-mode: screen;
+    }
+    body::after {
+        background: linear-gradient(to bottom, transparent, var(--scan), transparent);
+        height: 45vh;
+        inset: auto 0 auto 0;
+        animation: sweep 9s linear infinite;
+        opacity: 0.9;
+    }
+    @keyframes sweep {
+        from { transform: translateY(-50vh); }
+        to   { transform: translateY(150vh); }
+    }
+
+    .wrap { max-width: 1080px; margin: 0 auto; position: relative; z-index: 1; }
+
+    header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 1rem 1.5rem;
+        padding-bottom: 1.1rem;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .brand { flex: 1 1 320px; min-width: 0; }
+
+    .eyebrow {
+        margin: 0;
+        font-size: 0.7rem;
+        letter-spacing: 0.34em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+
+    h1 {
+        margin: 0.35rem 0 0;
+        font-size: clamp(1.5rem, 5vw, 2.35rem);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--accent);
+        text-shadow: var(--glow);
+    }
+
+    h1 .cursor {
+        display: inline-block;
+        width: 0.55em;
+        height: 1.05em;
+        margin-left: 0.15em;
+        vertical-align: -0.15em;
+        background: var(--accent);
+        box-shadow: var(--glow);
+        animation: blink 1.1s steps(1) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .tagline { margin: 0.45rem 0 0; color: var(--text-dim); font-size: 0.82rem; }
+
+    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .stat { min-width: 5.5rem; }
+    .stat b {
+        display: block;
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: var(--text);
+    }
+    .stat span {
+        font-size: 0.65rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+
+    #theme {
+        appearance: none;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.68rem;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.42rem 0.9rem;
+        transition: color 0.18s, border-color 0.18s, box-shadow 0.18s;
+    }
+    #theme:hover, #theme:focus-visible {
+        color: var(--accent);
+        border-color: var(--accent);
+        box-shadow: var(--glow);
+        outline: none;
+    }
+
+    .panel {
+        margin-top: 1.6rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(3px);
+        overflow-x: auto;
+    }
+
+    /* Fixed proportions: spare width is spread across all five columns
+       instead of pooling into one gap between "archive" and "size". */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        /* Wide enough that "1.3.3.0 LATEST" still fits the ver column. */
+        min-width: 800px;
+    }
+    .ver     { width: 20%; }
+    .archive { width: 29%; }
+    .size    { width: 13%; }
+    .delta   { width: 15%; }
+    .ts      { width: 23%; }
+
+    thead th {
+        position: sticky;
+        top: 0;
+        background: var(--panel);
+        backdrop-filter: blur(6px);
+        text-align: left;
+        font-weight: 500;
+        font-size: 0.64rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        padding: 0.85rem 1rem;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+    }
+
+    tbody td {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: var(--row-hover); }
+
+    .ver {
+        position: relative;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+    }
+    .ver::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 12%;
+        bottom: 12%;
+        width: 2px;
+        background: var(--accent);
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    tbody tr:hover .ver::before { opacity: 1; }
+
+    .tag {
+        margin-left: 0.55rem;
+        font-size: 0.58rem;
+        letter-spacing: 0.16em;
+        padding: 0.1rem 0.35rem;
+        border: 1px solid var(--accent-2);
+        color: var(--accent-2);
+        border-radius: 2px;
+        vertical-align: 0.1em;
+    }
+
+    a {
+        color: var(--text);
+        text-decoration: none;
+        border-bottom: 1px dashed var(--line);
+        word-break: break-all;
+    }
+    a:hover, a:focus-visible {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        text-shadow: var(--glow);
+        outline: none;
+    }
+
+    /* Right-aligned so the decimal points line up; headers follow the values.
+       The extra right padding keeps them off the next column's content. */
+    .size, .delta {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        text-align: right;
+        padding-right: 1.6rem;
+    }
+    .delta { color: var(--text-dim); }
+    .delta[data-dir="up"] { color: var(--up); }
+    .delta[data-dir="down"] { color: var(--down); }
+    .delta[data-dir="none"] { opacity: 0.55; }
+
+    .ts { white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+    .empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-dim); }
+
+    footer {
+        margin-top: 1.2rem;
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        body::after { animation: none; display: none; }
+        h1 .cursor { animation: none; }
+    }
+
+    @media (max-width: 560px) {
+        .stats { gap: 1.1rem; }
+        .stat b { font-size: 1rem; }
+    }
+`;
+
+// Runs before paint so the stored choice never flashes the wrong theme.
+const THEME_BOOT = `
+    (function () {
+        try {
+            var t = localStorage.getItem("hoard-theme");
+            if (t === "light") document.documentElement.dataset.theme = "light";
+        } catch (e) {}
+    })();
+`;
+
+const THEME_TOGGLE = `
+    (function () {
+        var btn = document.getElementById("theme");
+        if (!btn) return;
+        var root = document.documentElement;
+        function label() {
+            btn.textContent = root.dataset.theme === "light" ? "daylight" : "phosphor";
+        }
+        label();
+        btn.addEventListener("click", function () {
+            var light = root.dataset.theme !== "light";
+            if (light) root.dataset.theme = "light";
+            else root.removeAttribute("data-theme");
+            try { localStorage.setItem("hoard-theme", light ? "light" : "dark"); } catch (e) {}
+            label();
+        });
+    })();
+`;
+
 function renderHtml(mapping: Mapping): string {
   const versions = newestFirst(mapping.versions ?? []);
+  const totalSize = versions.reduce((sum, e) => sum + (e.fileSize || 0), 0);
   // Sorted newest first, so the top row is the newest build.
   const latestKey = versions.length ? versions[0].key : null;
 
@@ -88,7 +405,8 @@ function renderHtml(mapping: Mapping): string {
       const key = escapeHtml(entry.key);
       const name = escapeHtml(basename(entry.key));
       const version = escapeHtml(entry.version ?? "—");
-      const tag = entry.key === latestKey ? `<span class="tag">LATEST</span>` : "";
+      const tag =
+        entry.key === latestKey ? `<span class="tag">LATEST</span>` : "";
 
       // Rows are newest-first, so the previous release is the row below.
       const prev = versions[i + 1];
@@ -120,42 +438,51 @@ function renderHtml(mapping: Mapping): string {
     ? `<tbody>${rows}</tbody>`
     : `<tbody><tr><td class="empty" colspan="5">no archives in the hoard</td></tr></tbody>`;
 
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>bfportal: Hoarding</title>
-        <style>
-            body { font-family: sans-serif; }
-            table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            a { text-decoration: none; }
-            a:hover { text-decoration: underline; }
-            .size, .delta { text-align: right; }
-            .delta[data-dir="up"] { color: #1f7a33; }
-            .delta[data-dir="down"] { color: #b3261e; }
-            .delta[data-dir="none"] { opacity: 0.55; }
-        </style>
-    </head>
-    <body>
-        <h1>gala like to hoard</h1>
-        <table>
-            <thead>
-                <tr>
-                    <th class="ver">Ver</th>
-                    <th class="archive">Archive</th>
-                    <th class="size">Size</th>
-                    <th class="delta" title="change vs the previous release">&Delta; prev</th>
-                    <th class="ts">Last Modified (UTC) &darr;</th>
-                </tr>
-            </thead>
-    ${body}
-        </table>
-    </body>
-    </html>
-    `;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>bfportal: Hoarding</title>
+    <meta name="description" content="Archived Battlefield Portal SDK builds, mirrored on hoard.bfportal.gg">
+    <script>${THEME_BOOT}</script>
+    <style>${THEME_CSS}</style>
+</head>
+<body>
+    <div class="wrap">
+        <header>
+            <div class="brand">
+                <p class="eyebrow">hoard.bfportal.gg</p>
+                <h1>gala like to hoard<span class="cursor"></span></h1>
+                <p class="tagline">every Portal SDK build we caught on the way past. range requests supported &mdash; resume away.</p>
+            </div>
+            <div class="stats">
+                <div class="stat"><b>${versions.length}</b><span>builds</span></div>
+                <div class="stat"><b>${formatSize(totalSize)}</b><span>hoarded</span></div>
+            </div>
+            <button id="theme" type="button" title="toggle theme">phosphor</button>
+        </header>
+
+        <div class="panel">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="ver">ver</th>
+                        <th class="archive">archive</th>
+                        <th class="size">size</th>
+                        <th class="delta" title="change vs the previous release">&Delta; prev</th>
+                        <th class="ts">last modified (utc) &darr;</th>
+                    </tr>
+                </thead>
+${body}
+            </table>
+        </div>
+
+        <footer>// wachtower is watching</footer>
+    </div>
+    <script>${THEME_TOGGLE}</script>
+</body>
+</html>`;
 }
 
 /** Build a Content-Range header value from R2's parsed range. */
