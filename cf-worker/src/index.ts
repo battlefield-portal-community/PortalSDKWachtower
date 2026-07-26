@@ -33,23 +33,42 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function formatMB(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(2);
+function formatSize(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(2)} GB`;
+  return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
+}
+
+/** Strip the directory prefix so the row shows just the archive name. */
+function basename(key: string): string {
+  const parts = key.split("/");
+  return parts[parts.length - 1] || key;
 }
 
 function renderHtml(mapping: Mapping): string {
-  const rows = (mapping.versions ?? [])
+  const versions = mapping.versions ?? [];
+  // main.py treats the last entry as the newest, so mark that one.
+  const latestKey = versions.length ? versions[versions.length - 1].key : null;
+
+  const rows = versions
     .map((entry) => {
       const key = escapeHtml(entry.key);
+      const name = escapeHtml(basename(entry.key));
+      const version = escapeHtml(entry.version ?? "—");
+      const tag = entry.key === latestKey ? `<span class="tag">LATEST</span>` : "";
       return `
                 <tr>
-                    <td><a href="${key}">${key}</a></td>
-                    <td>${formatMB(entry.fileSize)}</td>
-                    <td>${escapeHtml(entry.lastModified)}</td>
-                </tr>
-        `;
+                    <td class="ver">${version}${tag}</td>
+                    <td class="archive"><a href="${key}" download>${name}</a></td>
+                    <td class="size">${formatSize(entry.fileSize)}</td>
+                    <td class="ts">${escapeHtml(entry.lastModified)}</td>
+                </tr>`;
     })
     .join("");
+
+  const body = rows
+    ? `<tbody>${rows}</tbody>`
+    : `<tbody><tr><td class="empty" colspan="4">no archives in the hoard</td></tr></tbody>`;
 
   return `
     <!DOCTYPE html>
@@ -71,14 +90,13 @@ function renderHtml(mapping: Mapping): string {
         <table>
             <thead>
                 <tr>
-                    <th>Key</th>
-                    <th>Size (MB)</th>
-                    <th>Last Modified</th>
+                    <th class="ver">Ver</th>
+                    <th class="archive">Archive</th>
+                    <th class="size">Size</th>
+                    <th class="ts">Last Modified (UTC)</th>
                 </tr>
             </thead>
-            <tbody>
-    ${rows}
-            </tbody>
+    ${body}
         </table>
     </body>
     </html>
