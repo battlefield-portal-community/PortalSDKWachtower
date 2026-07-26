@@ -93,6 +93,8 @@ const THEME_CSS = `
         --accent-2: #4ad9ff;
         --up: #6ee787;
         --down: #ff6b5e;
+        --up-bg: rgba(110, 231, 135, 0.12);
+        --down-bg: rgba(255, 107, 94, 0.12);
         --row-hover: rgba(184, 255, 47, 0.05);
         --scan: rgba(190, 255, 160, 0.028);
         --glow: 0 0 12px rgba(184, 255, 47, 0.45);
@@ -112,6 +114,8 @@ const THEME_CSS = `
         --accent-2: #00688c;
         --up: #1f7a33;
         --down: #b3261e;
+        --up-bg: rgba(31, 122, 51, 0.1);
+        --down-bg: rgba(179, 38, 30, 0.1);
         --row-hover: rgba(61, 122, 0, 0.07);
         --scan: rgba(24, 46, 20, 0.022);
         --glow: 0 0 10px rgba(61, 122, 0, 0.25);
@@ -255,11 +259,10 @@ const THEME_CSS = `
         /* Wide enough that "1.3.3.0 LATEST" still fits the ver column. */
         min-width: 800px;
     }
-    .ver     { width: 20%; }
-    .archive { width: 29%; }
-    .size    { width: 13%; }
-    .delta   { width: 15%; }
-    .ts      { width: 23%; }
+    .ver     { width: 18%; }
+    .archive { width: 30%; }
+    .size    { width: 28%; }
+    .ts      { width: 24%; }
 
     thead th {
         position: sticky;
@@ -329,18 +332,31 @@ const THEME_CSS = `
         outline: none;
     }
 
-    /* Right-aligned so the decimal points line up; headers follow the values.
-       The extra right padding keeps them off the next column's content. */
-    .size, .delta {
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
+    /* Size and its delta share one cell: a fixed-width right-aligned figure so
+       decimal points line up, then the chip always starting at the same x.
+       Inline-blocks rather than flex — a flex <td> drops out of the table's
+       column model and its fixed width stops applying. */
+    td.size { white-space: nowrap; }
+    .bytes {
+        display: inline-block;
+        width: 5.6em;
         text-align: right;
-        padding-right: 1.6rem;
+        font-variant-numeric: tabular-nums;
     }
-    .delta { color: var(--text-dim); }
-    .delta[data-dir="up"] { color: var(--up); }
-    .delta[data-dir="down"] { color: var(--down); }
-    .delta[data-dir="none"] { opacity: 0.55; }
+    .chip {
+        display: inline-block;
+        margin-left: 0.7rem;
+        font-size: 0.68rem;
+        letter-spacing: 0.02em;
+        font-variant-numeric: tabular-nums;
+        padding: 0.12rem 0.45rem;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        color: var(--text-dim);
+    }
+    .chip[data-dir="up"] { color: var(--up); background: var(--up-bg); }
+    .chip[data-dir="down"] { color: var(--down); background: var(--down-bg); }
+    .chip[data-dir="none"] { opacity: 0.45; border-style: dashed; }
 
     .ts { white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
@@ -410,7 +426,7 @@ function renderHtml(mapping: Mapping): string {
 
       // Rows are newest-first, so the previous release is the row below.
       const prev = versions[i + 1];
-      let delta = `<td class="delta" data-dir="none">&mdash;</td>`;
+      let chip = `<span class="chip" data-dir="none" title="oldest build in the hoard">first</span>`;
       if (prev) {
         const diff = entry.fileSize - prev.fileSize;
         const dir = diff > 0 ? "up" : diff < 0 ? "down" : "none";
@@ -420,15 +436,14 @@ function renderHtml(mapping: Mapping): string {
         const title = escapeHtml(
           `${pct} vs ${prev.version ?? basename(prev.key)}`,
         );
-        delta = `<td class="delta" data-dir="${dir}" title="${title}">${formatDelta(diff)}</td>`;
+        chip = `<span class="chip" data-dir="${dir}" title="${title}">${formatDelta(diff)}</span>`;
       }
 
       return `
                 <tr>
                     <td class="ver">${version}${tag}</td>
                     <td class="archive"><a href="${key}" download>${name}</a></td>
-                    <td class="size">${formatSize(entry.fileSize)}</td>
-                    ${delta}
+                    <td class="size"><span class="bytes">${formatSize(entry.fileSize)}</span>${chip}</td>
                     <td class="ts">${escapeHtml(entry.lastModified)}</td>
                 </tr>`;
     })
@@ -436,7 +451,7 @@ function renderHtml(mapping: Mapping): string {
 
   const body = rows
     ? `<tbody>${rows}</tbody>`
-    : `<tbody><tr><td class="empty" colspan="5">no archives in the hoard</td></tr></tbody>`;
+    : `<tbody><tr><td class="empty" colspan="4">no archives in the hoard</td></tr></tbody>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -469,8 +484,7 @@ function renderHtml(mapping: Mapping): string {
                     <tr>
                         <th class="ver">ver</th>
                         <th class="archive">archive</th>
-                        <th class="size">size</th>
-                        <th class="delta" title="change vs the previous release">&Delta; prev</th>
+                        <th class="size" title="size, and the change vs the previous release">size &middot; &Delta; prev</th>
                         <th class="ts">last modified (utc) &darr;</th>
                     </tr>
                 </thead>
