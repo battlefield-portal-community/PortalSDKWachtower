@@ -71,22 +71,46 @@ function newestFirst(versions: VersionEntry[]): VersionEntry[] {
   });
 }
 
+/** Signed size difference, e.g. "+1.06 GB" / "-742.19 MB". */
+function formatDelta(bytes: number): string {
+  if (bytes === 0) return "no change";
+  const sign = bytes > 0 ? "+" : "−";
+  return `${sign}${formatSize(Math.abs(bytes))}`;
+}
+
 function renderHtml(mapping: Mapping): string {
   const versions = newestFirst(mapping.versions ?? []);
   // Sorted newest first, so the top row is the newest build.
   const latestKey = versions.length ? versions[0].key : null;
 
   const rows = versions
-    .map((entry) => {
+    .map((entry, i) => {
       const key = escapeHtml(entry.key);
       const name = escapeHtml(basename(entry.key));
       const version = escapeHtml(entry.version ?? "—");
       const tag = entry.key === latestKey ? `<span class="tag">LATEST</span>` : "";
+
+      // Rows are newest-first, so the previous release is the row below.
+      const prev = versions[i + 1];
+      let delta = `<td class="delta" data-dir="none">&mdash;</td>`;
+      if (prev) {
+        const diff = entry.fileSize - prev.fileSize;
+        const dir = diff > 0 ? "up" : diff < 0 ? "down" : "none";
+        const pct = prev.fileSize
+          ? `${diff >= 0 ? "+" : "−"}${Math.abs((diff / prev.fileSize) * 100).toFixed(1)}%`
+          : "";
+        const title = escapeHtml(
+          `${pct} vs ${prev.version ?? basename(prev.key)}`,
+        );
+        delta = `<td class="delta" data-dir="${dir}" title="${title}">${formatDelta(diff)}</td>`;
+      }
+
       return `
                 <tr>
                     <td class="ver">${version}${tag}</td>
                     <td class="archive"><a href="${key}" download>${name}</a></td>
                     <td class="size">${formatSize(entry.fileSize)}</td>
+                    ${delta}
                     <td class="ts">${escapeHtml(entry.lastModified)}</td>
                 </tr>`;
     })
@@ -94,7 +118,7 @@ function renderHtml(mapping: Mapping): string {
 
   const body = rows
     ? `<tbody>${rows}</tbody>`
-    : `<tbody><tr><td class="empty" colspan="4">no archives in the hoard</td></tr></tbody>`;
+    : `<tbody><tr><td class="empty" colspan="5">no archives in the hoard</td></tr></tbody>`;
 
   return `
     <!DOCTYPE html>
@@ -109,6 +133,10 @@ function renderHtml(mapping: Mapping): string {
             tr:nth-child(even) { background-color: #f2f2f2; }
             a { text-decoration: none; }
             a:hover { text-decoration: underline; }
+            .size, .delta { text-align: right; }
+            .delta[data-dir="up"] { color: #1f7a33; }
+            .delta[data-dir="down"] { color: #b3261e; }
+            .delta[data-dir="none"] { opacity: 0.55; }
         </style>
     </head>
     <body>
@@ -119,6 +147,7 @@ function renderHtml(mapping: Mapping): string {
                     <th class="ver">Ver</th>
                     <th class="archive">Archive</th>
                     <th class="size">Size</th>
+                    <th class="delta" title="change vs the previous release">&Delta; prev</th>
                     <th class="ts">Last Modified (UTC) &darr;</th>
                 </tr>
             </thead>
