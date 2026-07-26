@@ -337,15 +337,22 @@ const THEME_CSS = `
        Inline-blocks rather than flex — a flex <td> drops out of the table's
        column model and its fixed width stops applying. */
     td.size { white-space: nowrap; }
+    /* Chip first, in a fixed slot that right-aligns it, so the chips share a
+       right edge and the figures after them still line up. */
+    .chipwrap {
+        display: inline-block;
+        width: 6em;
+        text-align: right;
+    }
     .bytes {
         display: inline-block;
         width: 5.6em;
+        margin-left: 0.8rem;
         text-align: right;
         font-variant-numeric: tabular-nums;
     }
     .chip {
         display: inline-block;
-        margin-left: 0.7rem;
         font-size: 0.68rem;
         letter-spacing: 0.02em;
         font-variant-numeric: tabular-nums;
@@ -443,7 +450,7 @@ function renderHtml(mapping: Mapping): string {
                 <tr>
                     <td class="ver">${version}${tag}</td>
                     <td class="archive"><a href="${key}" download>${name}</a></td>
-                    <td class="size"><span class="bytes">${formatSize(entry.fileSize)}</span>${chip}</td>
+                    <td class="size"><span class="chipwrap">${chip}</span><span class="bytes">${formatSize(entry.fileSize)}</span></td>
                     <td class="ts">${escapeHtml(entry.lastModified)}</td>
                 </tr>`;
     })
@@ -484,7 +491,7 @@ function renderHtml(mapping: Mapping): string {
                     <tr>
                         <th class="ver">ver</th>
                         <th class="archive">archive</th>
-                        <th class="size" title="size, and the change vs the previous release">size &middot; &Delta; prev</th>
+                        <th class="size" title="change vs the previous release, and the size">&Delta; prev &middot; size</th>
                         <th class="ts">last modified (utc) &darr;</th>
                     </tr>
                 </thead>
