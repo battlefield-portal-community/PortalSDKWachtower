@@ -3,16 +3,48 @@ import json
 import os
 from datetime import datetime, UTC
 from email.utils import parsedate_to_datetime
+from enum import Enum
 
 import httpx
+from pydantic import BaseModel
 
 from app.config import LOCK_FILE, URL, USER_AGENT, env
 from app.discord import send_discord_webhook
-from app.humanbytes import VersionEntry
 from app.r2 import upload_sdk_to_r2
 
-# Sentinel returned when the CDN reports the manifest is unchanged (HTTP 304).
-NOT_MODIFIED = object()
+
+class VersionInfo(BaseModel):
+    """A single entry from the versions.json manifest.
+
+    Field names mirror the manifest / lock-file JSON keys so the model
+    round-trips through ``json`` without aliasing. ``fileSize`` arrives as a
+    string and is coerced to int; ``lastModified`` is absent from the manifest
+    and filled in by us (from the CDN's Last-Modified header, or detection time).
+    """
+    version: str
+    fileSize: int
+    lastModified: str | None = None
+
+
+class FetchStatus(Enum):
+    UPDATED = "updated"            # 200 with a fresh manifest entry
+    NOT_MODIFIED = "not_modified"  # 304 — nothing changed since last poll
+    FAILED = "failed"              # bad status / malformed body (soft failure)
+
+
+class FetchResult(BaseModel):
+    """Outcome of a single versions.json fetch. ``entry`` is set only when
+    ``status`` is UPDATED; ``etag`` should be fed back into the next fetch."""
+    status: FetchStatus
+    etag: str | None = None
+    entry: VersionInfo | None = None
+
+
+class SdkState(BaseModel):
+    """The latest version/size we've seen, plus the ETag that tracks it."""
+    version: str | None = None
+    size: int | None = None
+    etag: str | None = None
 
 
 def _parse_http_date(value: str | None) -> str | None:
@@ -35,14 +67,11 @@ def _parse_http_date(value: str | None) -> str | None:
 
 async def get_version_details(
     client: httpx.AsyncClient, etag: str | None
-) -> tuple[VersionEntry | object | None, str | None]:
+) -> FetchResult:
     """Fetch the latest version entry from versions.json.
 
     Sends a conditional request (If-None-Match) so the CDN can answer 304 when
-    nothing changed — no body to download or parse. Returns ``(result, etag)``
-    where ``result`` is the newest VersionEntry, the ``NOT_MODIFIED`` sentinel,
-    or ``None`` on a soft failure (bad status / malformed body). The returned
-    etag should be fed back into the next call.
+    nothing changed — no body to download or parse.
     """
     headers = {'User-Agent': USER_AGENT}
     if etag:
@@ -51,11 +80,11 @@ async def get_version_details(
     response = await client.get(URL, headers=headers)
 
     if response.status_code == 304:
-        return NOT_MODIFIED, etag
+        return FetchResult(status=FetchStatus.NOT_MODIFIED, etag=etag)
 
     if response.status_code != 200:
         print(f"Failed to fetch data. Status code: {response.status_code}")
-        return None, etag
+        return FetchResult(status=FetchStatus.FAILED, etag=etag)
 
     data = response.json()
 
@@ -63,55 +92,55 @@ async def get_version_details(
     versions_list = data.get('versions', [])
     if not versions_list:
         print("Error: 'versions' list is empty or missing in JSON response.")
-        return None, etag
+        return FetchResult(status=FetchStatus.FAILED, etag=etag)
 
-    latest_entry = versions_list[-1]
-    latest_entry["fileSize"] = int(latest_entry["fileSize"])
+    entry = VersionInfo(**versions_list[-1])
     # Prefer the CDN's Last-Modified (when the manifest was published) over our
     # local detection time. check_version falls back if this is absent.
     published_at = _parse_http_date(response.headers.get("Last-Modified"))
     if published_at:
-        latest_entry["lastModified"] = published_at
+        entry.lastModified = published_at
     # Keep the CDN's ETag if it sent one; otherwise reuse the previous value.
-    return latest_entry, response.headers.get("ETag", etag)
+    return FetchResult(
+        status=FetchStatus.UPDATED,
+        etag=response.headers.get("ETag", etag),
+        entry=entry,
+    )
 
 
-async def check_version(
-    client: httpx.AsyncClient,
-    current_sdk_version: str,
-    current_sdk_size: float,
-    etag: str | None,
-) -> tuple[str, float, str | None]:
-    details, etag = await get_version_details(client, etag)
+async def check_version(client: httpx.AsyncClient, state: SdkState) -> SdkState:
+    result = await get_version_details(client, state.etag)
 
-    # Unchanged (304) or a soft failure: keep the current baseline as-is.
-    if details is NOT_MODIFIED or details is None:
-        return current_sdk_version, current_sdk_size, etag
+    # Unchanged (304) or a soft failure: keep the baseline, but adopt whatever
+    # ETag the fetch came back with.
+    if result.status is not FetchStatus.UPDATED or result.entry is None:
+        return state.model_copy(update={"etag": result.etag})
 
-    new_version = details['version']
-    new_size = details['fileSize']
+    entry = result.entry
+    new_version = entry.version
+    new_size = entry.fileSize
     # Check Version and Size Difference
-    version_mismatch = current_sdk_version != new_version
-    size_mismatch = current_sdk_size != new_size
+    version_mismatch = state.version != new_version
+    size_mismatch = state.size != new_size
 
     if version_mismatch:
-        print(f"Portal SDK version has changed. Old: {current_sdk_version}, New: {new_version}")
+        print(f"Portal SDK version has changed. Old: {state.version}, New: {new_version}")
 
     if size_mismatch:
-        print(f"Portal SDK size has changed. Old: {current_sdk_size}, New: {new_size}")
+        print(f"Portal SDK size has changed. Old: {state.size}, New: {new_size}")
 
     if version_mismatch or size_mismatch:
         # Timestamp of the release, in UTC. Prefer the manifest's Last-Modified
         # (set from the CDN header in get_version_details); fall back to the
         # moment we detected it if the CDN didn't send a usable header. Reused
         # for both the lock file and the R2 entry so they agree.
-        published_at = details.get("lastModified") or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-        details["lastModified"] = published_at
+        published_at = entry.lastModified or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        entry.lastModified = published_at
 
         try:
             if not env.skip_local_mapping_update:
                 with open(LOCK_FILE, 'w') as f:
-                    json.dump(details, f, indent=4)
+                    json.dump(entry.model_dump(), f, indent=4)
                 print(f"Updated {LOCK_FILE} with new version info.")
         except Exception as e:
             print(f"Failed to update {LOCK_FILE}: {e}")
@@ -119,7 +148,7 @@ async def check_version(
         # Notify first so the ping goes out ASAP. A failure here must NOT
         # block the R2 upload below — the two are independent.
         try:
-            await send_discord_webhook(new_version, new_size, current_sdk_version, current_sdk_size)
+            await send_discord_webhook(new_version, new_size, state.version, state.size)
         except Exception as e:
             print(f"Failed to send Discord notification: {e}")
 
@@ -129,22 +158,19 @@ async def check_version(
         except Exception as e:
             print(f"Failed to upload SDK to R2 / update mapping: {e}")
 
-        return new_version, new_size, etag
-
-    return current_sdk_version, current_sdk_size, etag
+    return SdkState(version=new_version, size=new_size, etag=result.etag)
 
 
 async def main():
-    current_sdk_version: str | None = None
-    current_sdk_size: float | None = None
+    state = SdkState()
 
     if os.path.exists(LOCK_FILE):
         print(f"Reading configuration from {LOCK_FILE}...")
         try:
             with open(LOCK_FILE, 'r') as f:
                 data = json.load(f)
-                current_sdk_version = data.get('version')
-                current_sdk_size = data.get('fileSize')
+                state.version = data.get('version')
+                state.size = data.get('fileSize')
         except Exception as e:
             print(f"Error reading lock file: {e}")
 
@@ -152,20 +178,18 @@ async def main():
     # a stalled connection fails fast instead of hanging the poll loop forever.
     timeout = httpx.Timeout(env.request_timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        etag: str | None = None
-
-        if not current_sdk_version or not current_sdk_size:
+        if not state.version or not state.size:
             print(f"{LOCK_FILE} not found or invalid. Fetching latest version to initialize...")
             try:
-                current_sdk_version, current_sdk_size, etag = await check_version(
-                    client, "INVALID", 0, etag
-                )
+                # Baseline that mismatches everything, so the first fetch is
+                # treated as a new release (notify + upload).
+                state = await check_version(client, SdkState(version="INVALID", size=0))
             except httpx.RequestError as e:
                 print(f"Could not reach {e.request.url!r} while initializing: {e}")
 
-        print(f"Current Baseline: Version={current_sdk_version}, Size={current_sdk_size}")
+        print(f"Current Baseline: Version={state.version}, Size={state.size}")
 
-        if current_sdk_version is None or current_sdk_size is None:
+        if state.version is None or state.size is None:
             print("Failed to fetch latest version to create baseline. Exiting...")
             return
 
@@ -178,9 +202,7 @@ async def main():
 
         while True:
             try:
-                current_sdk_version, current_sdk_size, etag = await check_version(
-                    client, current_sdk_version, current_sdk_size, etag
-                )
+                state = await check_version(client, state)
                 if consecutive_errors:
                     print(f"versions.json reachable again after {consecutive_errors} failed attempt(s).")
                 consecutive_errors = 0
