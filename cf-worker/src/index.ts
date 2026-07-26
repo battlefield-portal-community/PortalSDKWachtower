@@ -45,10 +45,36 @@ function basename(key: string): string {
   return parts[parts.length - 1] || key;
 }
 
+/** Compare dotted versions numerically so 1.10.0 sorts above 1.9.0. */
+function compareVersions(a: string, b: string): number {
+  const left = a.split(".");
+  const right = b.split(".");
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const x = Number(left[i] ?? 0);
+    const y = Number(right[i] ?? 0);
+    if (Number.isNaN(x) || Number.isNaN(y)) return 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+/**
+ * Newest first. lastModified is a fixed "YYYY-MM-DD HH:MM:SS" layout, so a
+ * plain string compare is already chronological; equal stamps fall back to
+ * the version number.
+ */
+function newestFirst(versions: VersionEntry[]): VersionEntry[] {
+  return [...versions].sort((a, b) => {
+    const byTime = (b.lastModified ?? "").localeCompare(a.lastModified ?? "");
+    if (byTime !== 0) return byTime;
+    return compareVersions(b.version ?? "", a.version ?? "");
+  });
+}
+
 function renderHtml(mapping: Mapping): string {
-  const versions = mapping.versions ?? [];
-  // main.py treats the last entry as the newest, so mark that one.
-  const latestKey = versions.length ? versions[versions.length - 1].key : null;
+  const versions = newestFirst(mapping.versions ?? []);
+  // Sorted newest first, so the top row is the newest build.
+  const latestKey = versions.length ? versions[0].key : null;
 
   const rows = versions
     .map((entry) => {
@@ -93,7 +119,7 @@ function renderHtml(mapping: Mapping): string {
                     <th class="ver">Ver</th>
                     <th class="archive">Archive</th>
                     <th class="size">Size</th>
-                    <th class="ts">Last Modified (UTC)</th>
+                    <th class="ts">Last Modified (UTC) &darr;</th>
                 </tr>
             </thead>
     ${body}
