@@ -75,10 +75,16 @@ Set a `CLOUDFLARE_API_TOKEN` repo secret with the permissions listed above.
 
 ## Running the watchtower
 
-The watchtower (`main.py`) is containerized. Copy `.env.example` to `.env`, fill
-in the Discord webhook and `R2_*` credentials (S3 access key / secret for the
-bucket), then:
+The watchtower is the [`app`](src/app/) package. Copy `.env.example` to `.env`,
+fill in the Discord webhook and `R2_*` credentials (S3 access key / secret for
+the bucket), then run it either in Docker:
 
 ```sh
 docker compose up --build
+```
+
+or locally with [uv](https://docs.astral.sh/uv/):
+
+```sh
+uv run app
 ```
