@@ -3,5 +3,4 @@ services:
     build: .
     volumes:
       - ./version.lock:/app/version.lock
-    command: bash -c "python3 /app/main.py"
     env_file: .env
