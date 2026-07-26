@@ -88,3 +88,31 @@ or locally with [uv](https://docs.astral.sh/uv/):
 ```sh
 uv run app
 ```
+
+### Configuration
+
+The watchtower is configured entirely through environment variables (read from
+`.env`). Names are case-insensitive.
+
+**Required:**
+
+| Variable | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord webhook the watchtower pings on a new SDK version. |
+| `R2_ACCOUNT_ID` | Cloudflare account ID for the R2 bucket. |
+| `R2_ACCESS_KEY_ID` | R2 (S3-compatible) access key. |
+| `R2_SECRET_ACCESS_KEY` | R2 (S3-compatible) secret key. |
+| `R2_BUCKET` | Bucket holding the SDK zips and `versions.json`. |
+| `R2_ENDPOINT` | R2 S3 endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com`. |
+
+**Optional** (defaults shown):
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOCK_FILE_PATH` | `version.lock` | Path to the local version lock file. |
+| `POLL_INTERVAL_SECONDS` | `10` | How often to poll `versions.json` when healthy. Polls are cheap conditional `304`s, so this stays short for fast detection. |
+| `REQUEST_TIMEOUT_SECONDS` | `15` | Per-request timeout, so a stalled connection fails fast instead of hanging. |
+| `MAX_BACKOFF_SECONDS` | `300` | Upper bound on the exponential backoff applied after consecutive fetch failures. |
+| `SKIP_R2_UPLOAD` | `false` | Skip downloading + uploading the SDK to R2 (still notifies). |
+| `SKIP_R2_MAPPING_UPDATE` | `false` | Skip updating the `versions.json` mapping in R2. |
+| `SKIP_LOCAL_MAPPING_UPDATE` | `false` | Skip rewriting the local lock file. |
